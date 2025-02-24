@@ -106,3 +106,47 @@ num25 (Azure)
 
 num26 (azure):
    copy of num23, turn on weighted loss
+
+num27 (aws):
+    copy of num26, to test num_worker = 8 (1100 sec)
+
+num28 (aws):
+    copy of num26, num_worker=96(max) (1100 sec)
+
+num28 (aws):
+    copy of num26, num_worker=64
+
+num29 (azure):
+    train with ufs-replay data, 2010-2016 train, 2017-2018 test
+    hard_thresholding_fraction=1.0
+
+num30 (azure):
+    train with full data
+    hard_thresholding_fraction=0.9
+
+num31 (azure):
+    copy of num30
+    hard_thresholding_fraction=1.0
+
+num32 (aws-east2a):
+    copy of num31
+    hard_thresholding_fraction=1.0
+    embed_dim = 256
+
+num33 (aws-east2a):
+    train with ufs data, fixed bugs in dimension
+    hard_thresholding_fraction=1.0
+    embed_dim = 256
+    num_worker = 8 (2505 sec, slower than aws-east1f, not sure if it is cuda version making difference, east2a: cuda12.6, east1f: cuda12.4)
+
+num34 (aws-east2a):
+    copy of num33, replace land.npy (land, sea, ice) with lsm (land and sea only)
+
+nunm35 (aws-east2a):
+    copy of num34, embed_num=192
+
+num36 (aws-east2a):
+   copy of num34
+   added icetk as forcing
+   num_dim = 256
+   hard_thresholding_fraction=1.0

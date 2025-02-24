@@ -120,9 +120,9 @@ class GetDataset(Dataset):
             for var in variables:
                 if key == 'surface' or key == 'forcing':
                     if self.multi_step_training:
-                        values = self.files[year_idx][var].isel(time=np.arange(local_idx, local_idx+step+self.nfutures)).transpose('time', 'latitude', 'longitude').values[:,::-1,:] #reverse latitude
+                        values = self.files[year_idx][var].isel(time=np.arange(local_idx, local_idx+step+self.nfutures)).values #reverse latitud
                     else:
-                        values = self.files[year_idx][var].isel(time=[local_idx, local_idx+step]).transpose('time', 'latitude', 'longitude').values[:,::-1,:] #reverse latitude
+                        values = self.files[year_idx][var].isel(time=[local_idx, local_idx+step]).values #reverse latitude
 
                     # check nan
                     if np.sum(np.isnan(values)) > 1:
@@ -132,14 +132,14 @@ class GetDataset(Dataset):
 
                 elif key == 'pressure_level':
                     if self.multi_step_training:
-                        values = self.files[year_idx][var].isel(time=np.arange(local_idx, local_idx+step+self.nfutures)).transpose('time', 'level', 'latitude', 'longitude').sel(level=self.levels).values
+                        values = self.files[year_idx][var].isel(time=np.arange(local_idx, local_idx+step+self.nfutures)).sel(level=self.levels).values
                     else:
-                        values = self.files[year_idx][var].isel(time=[local_idx, local_idx+step]).transpose('time', 'level', 'latitude', 'longitude').sel(level=self.levels).values
+                        values = self.files[year_idx][var].isel(time=[local_idx, local_idx+step]).sel(level=self.levels).values
                     for ilev in np.arange(len(self.levels)):
                         #if np.sum(np.isnan(values[:, ilev, :, :])) > 1:
                         #    data.append(np.nan_to_num(values[:, ilev, ::-1, :], nan=0.0))
                         #else:
-                        data.append(values[:, ilev, ::-1, :]) #reverse latitude
+                        data.append(values[:, ilev, :, :]) #reverse latitude
 
                 else:
                     raise valueError(f'{key} is not in ["surface", "pressure_level", "forcing"]')
