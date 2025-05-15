@@ -43,7 +43,7 @@ class GetDataset(Dataset):
 
         self.attrs = {
             'surface': params.vars_surface,
-            'pressure_level': params.vars_pl,
+            'vertical': params.vars_pl,
             'forcing': params.vars_forcing,
         }
         self.levels = params.levels
@@ -90,6 +90,18 @@ class GetDataset(Dataset):
         else:
             self.lake = None
 
+    def triple_interp(self, da):
+        # first go at interpolation along lines of latitude
+        da_interp = da.interpolate_na(dim='longitude', method='linear', use_coordinate=False)
+
+        # offset and interpolate again, this allows interpolation where nans persist to boundary
+        da_double_interp = da_interp.roll(longitude=int(len(da_interp.longitude)/2)).interpolate_na(dim='longitude',method='linear',use_coordinate=False).roll(longitude=len(da_interp.longitude)-int(len(da_interp.longitude)/2))
+
+        # last round of interpolation fills in N-S boundary nans by offsetting and interpolating pole to pole.
+        da_triple_interp = da_double_interp.roll(latitude=int(len(da_interp.latitude)/2)).interpolate_na(dim='latitude',method='linear',use_coordinate=False).roll(latitude=len(da_interp.latitude)-int(len(da_interp.latitude)/2))
+
+        return da_triple_interp.values
+
     def __len__(self):
         return self.n_samples_total
 
@@ -100,55 +112,77 @@ class GetDataset(Dataset):
         if self.files[year_idx] is None:
             self._open_files(year_idx)
 
-        #if local_idx < self.dt * self.n_history:
-        #    local_idx += self.dt * self.n_history
+        if local_idx < self.dt * self.n_history:
+            local_idx += self.dt * self.n_history
 
         #step = 0 if local_idx >= self.n_samples_per_year - self.dt else self.dt 
         if local_idx >= self.n_samples_per_year - self.dt:
-            local_idx = self.n_samples_per_year - 2 * self.dt
+            local_idx = self.n_samples_per_year - (self.nfutures + 2) * self.dt - 1
 
         step = int(self.dt)
 
         if self.multi_step_training:
-            if local_idx >= self.n_samples_per_year - self.nfutures * self.dt:
-                local_idx = self.n_samples_per_year - (self.nfutures + 1) * self.dt
+            if local_idx >= self.n_samples_per_year - (self.nfutures + 1) * self.dt:
+                local_idx = self.n_samples_per_year - (self.nfutures + 1) * self.dt - 1
 
         #logging.info(f'year_idx is {year_idx}, local_idx is {local_idx}, future index is {local_idx+step+self.nfutures}')
 
         data = []
         for key, variables in self.attrs.items():
-            for var in variables:
-                if key == 'surface' or key == 'forcing':
-                    if self.multi_step_training:
-                        values = self.files[year_idx][var].isel(time=np.arange(local_idx, local_idx+step+self.nfutures)).values #reverse latitud
-                    else:
-                        values = self.files[year_idx][var].isel(time=[local_idx, local_idx+step]).values #reverse latitude
+            if variables is not None:
+                for var in variables:
+                    if key == 'surface' or key == 'forcing':
+                        if self.multi_step_training:
+                            #values = self.files[year_idx][var].isel(time=np.arange(local_idx, local_idx+step+self.nfutures)).values
+                            if key == 'surface' and (self.params.model == 'ocean'):
+                                values = self.triple_interp(self.files[year_idx][var].isel(time=np.arange(local_idx-step*self.n_history, local_idx+(self.nfutures+1)*step+1, step)).chunk({'time': 1, 'latitude': 128, 'longitude': 256}))
 
-                    # check nan
-                    if np.sum(np.isnan(values)) > 1:
-                        data.append(np.nan_to_num(values, nan=-99.))
-                    else:
+                            else:
+                                values = self.files[year_idx][var].isel(time=np.arange(local_idx-step*self.n_history, local_idx+(self.nfutures+1)*step+1, step)).values
+                        else:
+                            #values = self.files[year_idx][var].isel(time=[local_idx, local_idx+step]).values 
+                            if key == 'surface' and (self.params.model == 'ocean'):
+                                values = self.triple_interp(self.files[year_idx][var].isel(time=np.arange(local_idx-step*self.n_history, local_idx+(self.nfutures+1)*step+1, step)).chunk({'time': 1, 'latitude': 128, 'longitude': 256}))
+                            else:
+                                values = self.files[year_idx][var].isel(time=np.arange(local_idx-step*self.n_history, local_idx+(self.nfutures+1)*step+1, step)).values
+
+                        ## check nan
+                        #if np.sum(np.isnan(values)) > 1:
+                        #    data.append(np.nan_to_num(values, nan=0.0))
+                        #else:
+                        #    data.append(values)
                         data.append(values)
 
-                elif key == 'pressure_level':
-                    if self.multi_step_training:
-                        values = self.files[year_idx][var].isel(time=np.arange(local_idx, local_idx+step+self.nfutures)).sel(level=self.levels).values
-                    else:
-                        values = self.files[year_idx][var].isel(time=[local_idx, local_idx+step]).sel(level=self.levels).values
-                    for ilev in np.arange(len(self.levels)):
-                        #if np.sum(np.isnan(values[:, ilev, :, :])) > 1:
-                        #    data.append(np.nan_to_num(values[:, ilev, ::-1, :], nan=0.0))
-                        #else:
-                        data.append(values[:, ilev, :, :]) #reverse latitude
+                    elif key == 'vertical':
+                        if self.multi_step_training:
+                            # TODO: change atmos's level and ocean's z_l to the same name "vlevel"
+                            #values = self.files[year_idx][var].isel(time=np.arange(local_idx, local_idx+step+self.nfutures)).sel(z_l=self.levels, method='nearest').values
+                            if self.params.model == 'ocean':
+                                values = self.triple_interp(self.files[year_idx][var].isel(time=np.arange(local_idx-step*self.n_history, local_idx+(self.nfutures+1)*step+1, step)).sel(z_l=self.levels, method='nearest').chunk({'time': 1, 'z_l': 6, 'latitude': 128, 'longitude': 256}))
+                            else:
+                                values = self.files[year_idx][var].isel(time=np.arange(local_idx-step*self.n_history, local_idx+(self.nfutures+1)*step+1, step)).sel(level=self.levels, method='nearest')
+                        else:
+                            #values = self.files[year_idx][var].isel(time=[local_idx, local_idx+step]).sel(z_l=self.levels, method='nearest').values
 
-                else:
-                    raise valueError(f'{key} is not in ["surface", "pressure_level", "forcing"]')
+                            if self.params.model == 'ocean':
+                                values = self.triple_interp(self.files[year_idx][var].isel(time=np.arange(local_idx-step*self.n_history, local_idx+(self.nfutures+1)*step+1, step)).sel(z_l=self.levels, method='nearest').chunk({'time': 1, 'z_l': 6, 'latitude': 128, 'longitude': 256}))
+                            else:
+                                values = self.files[year_idx][var].isel(time=np.arange(local_idx-step*self.n_history, local_idx+(self.nfutures+1)*step+1, step)).sel(level=self.levels, method='nearest')
+                        for ilev in np.arange(len(self.levels)):
+                            #if np.sum(np.isnan(values[:, ilev, :, :])) > 1:
+                            #    data.append(np.nan_to_num(values[:, ilev, :, :], nan=0.0))
+                            #else:
+                            #    data.append(values[:, ilev, :, :]) 
+                            data.append(values[:, ilev, :, :]) 
+
+                    else:
+                        raise ValueError(f'{key} is not in ["surface", "pressure_level", "forcing"]')
         
         data = np.array(data)
 
         if self.multi_step_training:
-            return reshape_fields(np.squeeze(data[:,0,:,:]), 'inp', self.params, self.normalize, self.orog, self.lsm, self.lake), \
-                reshape_fields(np.squeeze(data[:self.params.n_out_channels,1:,:,:]), 'tar', self.params, self.normalize, self.orog, self.lsm, self.lake)
+            return reshape_fields(np.squeeze(data[:,:self.n_history+1,:,:]), 'inp', self.params, self.normalize, self.orog, self.lsm, self.lake), \
+                    reshape_fields(np.squeeze(data[:self.params.n_out_channels,self.n_history+1:,:,:]), 'tar', self.params, self.normalize, self.orog, self.lsm, self.lake)
         else:
-            return reshape_fields(np.squeeze(data[:,0,:,:]), 'inp', self.params, self.normalize, self.orog, self.lsm, self.lake), \
-                reshape_fields(np.squeeze(data[:self.params.n_out_channels,1,:,:]), 'tar', self.params, self.normalize, self.orog, self.lsm, self.lake)
+            return reshape_fields(np.squeeze(data[:,:self.n_history+1,:,:]), 'inp', self.params, self.normalize, self.orog, self.lsm, self.lake), \
+                    reshape_fields(np.squeeze(data[:self.params.n_out_channels,self.n_history+1:,:,:]), 'tar', self.params, self.normalize, self.orog, self.lsm, self.lake)
